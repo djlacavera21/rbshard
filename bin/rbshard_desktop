@@ -12,14 +12,21 @@ class RbShardDesktop
     @input  = @builder['input_buffer']
     @output = @builder['output_buffer']
     @key_entry = @builder['key']
+    @statusbar = @builder['statusbar']
+    @context_id = @statusbar.context_id('status')
     @builder['encode_button'].signal_connect('clicked') { encode }
     @builder['decode_button'].signal_connect('clicked') { decode }
     @builder['open_item'].signal_connect('activate') { open_file }
     @builder['save_item'].signal_connect('activate') { save_file }
     @builder['encrypt_file_item'].signal_connect('activate') { encrypt_file }
     @builder['decrypt_file_item'].signal_connect('activate') { decrypt_file }
+    @builder['copy_result_item'].signal_connect('activate') { copy_result }
+    @builder['clear_input_item'].signal_connect('activate') { clear_input }
+    @builder['clear_output_item'].signal_connect('activate') { clear_output }
+    @builder['clear_all_item'].signal_connect('activate') { clear_all }
     @builder['quit_item'].signal_connect('activate') { Gtk.main_quit }
     @window.signal_connect('destroy') { Gtk.main_quit }
+    @window.set_default_size(600, 400)
     @window.show_all
   end
 
@@ -32,6 +39,7 @@ class RbShardDesktop
     end
     result = Base64.strict_encode64(RbShard.encode(data, key))
     @output.text = result
+    update_status('Text encoded')
   rescue => e
     show_error(e.message)
   end
@@ -45,6 +53,7 @@ class RbShardDesktop
     end
     decoded = RbShard.decode(Base64.strict_decode64(data), key)
     @output.text = decoded
+    update_status('Text decoded')
   rescue => e
     show_error(e.message)
   end
@@ -59,6 +68,7 @@ class RbShardDesktop
     )
     if dialog.run == Gtk::ResponseType::ACCEPT
       @input.text = File.read(dialog.filename)
+      update_status("Loaded #{File.basename(dialog.filename)}")
     end
     dialog.destroy
   end
@@ -74,6 +84,7 @@ class RbShardDesktop
     dialog.do_overwrite_confirmation = true
     if dialog.run == Gtk::ResponseType::ACCEPT
       File.write(dialog.filename, @output.text)
+      update_status("Saved #{File.basename(dialog.filename)}")
     end
     dialog.destroy
   end
@@ -150,6 +161,28 @@ class RbShardDesktop
     show_error(e.message)
   end
 
+  def copy_result
+    clipboard = Gtk::Clipboard.default(@window.display)
+    clipboard.set_text(@output.text)
+    update_status('Result copied to clipboard')
+  end
+
+  def clear_input
+    @input.text = ''
+    update_status('Input cleared')
+  end
+
+  def clear_output
+    @output.text = ''
+    update_status('Output cleared')
+  end
+
+  def clear_all
+    clear_input
+    clear_output
+    update_status('Input and output cleared')
+  end
+
   def validate_key(key)
     return 'Key is required' if key.to_s.empty?
     return "Key must be at least #{KEY_MIN_LEN} characters" if key.length < KEY_MIN_LEN
@@ -178,6 +211,12 @@ class RbShardDesktop
     )
     dialog.run
     dialog.destroy
+    update_status(message)
+  end
+
+  def update_status(message)
+    @statusbar.pop(@context_id) rescue nil
+    @statusbar.push(@context_id, message)
   end
 
   UI = <<~UI
@@ -219,6 +258,35 @@ class RbShardDesktop
                         <child>
                           <object class="GtkMenuItem" id="quit_item">
                             <property name="label">Quit</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkMenuItem" id="edit_menu_item">
+                    <property name="label">Edit</property>
+                    <child type="submenu">
+                      <object class="GtkMenu" id="edit_menu">
+                        <child>
+                          <object class="GtkMenuItem" id="copy_result_item">
+                            <property name="label">Copy Result</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkMenuItem" id="clear_input_item">
+                            <property name="label">Clear Input</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkMenuItem" id="clear_output_item">
+                            <property name="label">Clear Output</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkMenuItem" id="clear_all_item">
+                            <property name="label">Clear All</property>
                           </object>
                         </child>
                       </object>
@@ -288,6 +356,9 @@ class RbShardDesktop
                   </object>
                 </child>
               </object>
+            </child>
+            <child>
+              <object class="GtkStatusbar" id="statusbar"/>
             </child>
           </object>
         </child>
