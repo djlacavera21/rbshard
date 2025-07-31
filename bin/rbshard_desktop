@@ -16,6 +16,8 @@ class RbShardDesktop
     @builder['decode_button'].signal_connect('clicked') { decode }
     @builder['open_item'].signal_connect('activate') { open_file }
     @builder['save_item'].signal_connect('activate') { save_file }
+    @builder['encrypt_file_item'].signal_connect('activate') { encrypt_file }
+    @builder['decrypt_file_item'].signal_connect('activate') { decrypt_file }
     @builder['quit_item'].signal_connect('activate') { Gtk.main_quit }
     @window.signal_connect('destroy') { Gtk.main_quit }
     @window.show_all
@@ -76,6 +78,78 @@ class RbShardDesktop
     dialog.destroy
   end
 
+  def encrypt_file
+    key = @key_entry.text
+    if (err = validate_key(key))
+      show_error(err)
+      return
+    end
+    open_dialog = Gtk::FileChooserDialog.new(
+      title: 'Select File to Encrypt',
+      parent: @window,
+      action: Gtk::FileChooserAction::OPEN,
+      buttons: [[Gtk::Stock::OPEN, Gtk::ResponseType::ACCEPT],
+                [Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL]]
+    )
+    if open_dialog.run == Gtk::ResponseType::ACCEPT
+      data = File.binread(open_dialog.filename)
+      encoded = RbShard.encode(data, key)
+      save_dialog = Gtk::FileChooserDialog.new(
+        title: 'Save Encrypted File',
+        parent: @window,
+        action: Gtk::FileChooserAction::SAVE,
+        buttons: [[Gtk::Stock::SAVE, Gtk::ResponseType::ACCEPT],
+                  [Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL]]
+      )
+      save_dialog.do_overwrite_confirmation = true
+      save_dialog.current_name = File.basename(open_dialog.filename) + '.rbs'
+      if save_dialog.run == Gtk::ResponseType::ACCEPT
+        File.binwrite(save_dialog.filename, encoded)
+        show_info('File encrypted successfully')
+      end
+      save_dialog.destroy
+    end
+    open_dialog.destroy
+  rescue => e
+    show_error(e.message)
+  end
+
+  def decrypt_file
+    key = @key_entry.text
+    if (err = validate_key(key))
+      show_error(err)
+      return
+    end
+    open_dialog = Gtk::FileChooserDialog.new(
+      title: 'Select File to Decrypt',
+      parent: @window,
+      action: Gtk::FileChooserAction::OPEN,
+      buttons: [[Gtk::Stock::OPEN, Gtk::ResponseType::ACCEPT],
+                [Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL]]
+    )
+    if open_dialog.run == Gtk::ResponseType::ACCEPT
+      data = File.binread(open_dialog.filename)
+      decoded = RbShard.decode(data, key)
+      save_dialog = Gtk::FileChooserDialog.new(
+        title: 'Save Decrypted File',
+        parent: @window,
+        action: Gtk::FileChooserAction::SAVE,
+        buttons: [[Gtk::Stock::SAVE, Gtk::ResponseType::ACCEPT],
+                  [Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL]]
+      )
+      save_dialog.do_overwrite_confirmation = true
+      save_dialog.current_name = File.basename(open_dialog.filename, '.rbs')
+      if save_dialog.run == Gtk::ResponseType::ACCEPT
+        File.binwrite(save_dialog.filename, decoded)
+        show_info('File decrypted successfully')
+      end
+      save_dialog.destroy
+    end
+    open_dialog.destroy
+  rescue => e
+    show_error(e.message)
+  end
+
   def validate_key(key)
     return 'Key is required' if key.to_s.empty?
     return "Key must be at least #{KEY_MIN_LEN} characters" if key.length < KEY_MIN_LEN
@@ -87,6 +161,18 @@ class RbShardDesktop
       parent: @window,
       flags: :destroy_with_parent,
       type: :error,
+      buttons_type: :close,
+      message: message
+    )
+    dialog.run
+    dialog.destroy
+  end
+
+  def show_info(message)
+    dialog = Gtk::MessageDialog.new(
+      parent: @window,
+      flags: :destroy_with_parent,
+      type: :info,
       buttons_type: :close,
       message: message
     )
@@ -118,6 +204,16 @@ class RbShardDesktop
                         <child>
                           <object class="GtkMenuItem" id="save_item">
                             <property name="label">Save Result...</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkMenuItem" id="encrypt_file_item">
+                            <property name="label">Encrypt File...</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkMenuItem" id="decrypt_file_item">
+                            <property name="label">Decrypt File...</property>
                           </object>
                         </child>
                         <child>
