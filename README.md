@@ -29,4 +29,16 @@ original = RbShard.load_rbs('message.rbs', key)
 puts original # => "Hello rbshard!"
 ```
 
+## Web UI
+
+An experimental web interface is provided to quickly try out encoding and
+decoding operations. Start the server with:
+
+```
+ruby bin/rbshard_ui
+```
+
+Then visit `http://localhost:4567` in your browser to access forms for encoding
+and decoding text using a secret key.
+
 Development is experimental and feedback is welcome.
