@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+require 'webrick'
+require 'base64'
+require_relative '../lib/rbshard'
+
+class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
+  def do_GET(request, response)
+    if request.path == '/'
+      response.content_type = 'text/html'
+      response.body = main_form
+    else
+      response.status = 404
+      response.body = 'Not found'
+    end
+  end
+
+  def do_POST(request, response)
+    case request.path
+    when '/encode'
+      data = request.query['data'] || ''
+      key = request.query['key'] || ''
+      encoded = RbShard.encode(data, key)
+      result = Base64.strict_encode64(encoded)
+      response.content_type = 'text/html'
+      response.body = result_page('Encode', result)
+    when '/decode'
+      b64 = request.query['data'] || ''
+      key = request.query['key'] || ''
+      begin
+        decoded = RbShard.decode(Base64.strict_decode64(b64), key)
+        result = decoded
+      rescue => e
+        result = "Error: #{e.message}"
+      end
+      response.content_type = 'text/html'
+      response.body = result_page('Decode', result)
+    else
+      response.status = 404
+      response.body = 'Not found'
+    end
+  end
+
+  private
+
+  def main_form
+    <<-HTML
+    <html>
+      <body>
+        <h1>RbShard UI</h1>
+        <h2>Encode</h2>
+        <form action="/encode" method="post">
+          <textarea name="data" rows="5" cols="60"></textarea><br/>
+          Key: <input type="text" name="key"/><br/>
+          <input type="submit" value="Encode"/>
+        </form>
+        <h2>Decode</h2>
+        <form action="/decode" method="post">
+          <textarea name="data" rows="5" cols="60"></textarea><br/>
+          Key: <input type="text" name="key"/><br/>
+          <input type="submit" value="Decode"/>
+        </form>
+      </body>
+    </html>
+    HTML
+  end
+
+  def result_page(action, result)
+    <<-HTML
+    <html>
+      <body>
+        <h1>#{action} Result</h1>
+        <textarea rows="5" cols="60">#{result}</textarea><br/>
+        <a href="/">Back</a>
+      </body>
+    </html>
+    HTML
+  end
+end
+
+server = WEBrick::HTTPServer.new(Port: 4567)
+server.mount '/', RbShardServlet
+trap('INT') { server.shutdown }
+server.start
