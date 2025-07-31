@@ -1,0 +1,20 @@
+PATH
+  remote: .
+  specs:
+    rbshard (0.1.0)
+      twofish (~> 1.0)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    twofish (1.0.8)
+
+PLATFORMS
+  ruby
+  x86_64-linux
+
+DEPENDENCIES
+  rbshard!
+
+BUNDLED WITH
+   2.6.7

@@ -1,5 +1,32 @@
 # rbshard
 
- rbshard 0.0.2
+rbshard 0.1.0
 
-A Compression/Encyption All in one framework. No this is not sequential C/E but rather fully intergrated C/E built entirely from Ruby. Forking from both the LZW and Twofish source code and meshing the two into seamless platform for C/E/FT. RbShard introduces a brand new file extension (.rbs). Currently the file extension (.rbs) and its graphic (A cutout of the middle section of a ruby outlined in red and filled with black. on a black towhite center spectrum filepage) are still under development. RbShard as in future release v. 0.0.2 will only support the creation of .rbs. Development of a framework is currently UnD to support file transfer with on a secure SSL channel using a QEKM (Quantum Electronic Key Mangement) driver and a fully dedicated server. Currently this technology is considered 'Bleeding Edge'. and entirely proprietary in nature as this Gem is updated any feedback or assistance is more than appreciated.
+RbShard provides simple compression and encryption utilities built in Ruby.
+Compression is performed with a minimal LZW implementation and data is
+encrypted using the Twofish cipher. Files stored with the `.rbs` extension
+contain compressed and encrypted payloads.
+
+## Features
+
+* LZW based compression and decompression
+* Twofish encryption and decryption
+* Convenience helpers to read and write `.rbs` files
+
+## Usage
+
+```
+require 'rbshard'
+
+data = 'Hello rbshard!'
+key = 'secretkey1234567'
+
+# Encode and save a file
+RbShard.save_rbs('message.rbs', data, key)
+
+# Load and decode
+original = RbShard.load_rbs('message.rbs', key)
+puts original # => "Hello rbshard!"
+```
+
+Development is experimental and feedback is welcome.
