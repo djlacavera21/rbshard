@@ -4,6 +4,14 @@ require 'base64'
 require 'cgi'
 require_relative '../lib/rbshard'
 
+KEY_MIN_LEN = 8
+
+def validate_key(key)
+  return 'Error: key is required' if key.to_s.empty?
+  return "Error: key must be at least #{KEY_MIN_LEN} characters" if key.length < KEY_MIN_LEN
+  nil
+end
+
 class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
   def do_GET(request, response)
     if request.path == '/'
@@ -20,8 +28,8 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
     when '/encode'
       data = request.query['data'] || ''
       key = request.query['key'] || ''
-      if key.empty?
-        result = 'Error: key is required'
+      if (err = validate_key(key))
+        result = err
       else
         encoded = RbShard.encode(data, key)
         result = Base64.strict_encode64(encoded)
@@ -31,8 +39,8 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
     when '/decode'
       b64 = request.query['data'] || ''
       key = request.query['key'] || ''
-      if key.empty?
-        result = 'Error: key is required'
+      if (err = validate_key(key))
+        result = err
       else
         begin
           decoded = RbShard.decode(Base64.strict_decode64(b64), key)
@@ -43,6 +51,44 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
       end
       response.content_type = 'text/html'
       response.body = result_page('Decode', result)
+    when '/encode_file'
+      file = request.query['file']&.tempfile
+      key  = request.query['key'] || ''
+      if (err = validate_key(key))
+        result = err
+      elsif file.nil?
+        result = 'Error: file is required'
+      else
+        encoded = RbShard.encode(file.read, key)
+        response.status = 200
+        response['Content-Type'] = 'application/octet-stream'
+        response['Content-Disposition'] = 'attachment; filename="encoded.rbs"'
+        response.body = encoded
+        return
+      end
+      response.content_type = 'text/html'
+      response.body = result_page('Encode File', result)
+    when '/decode_file'
+      file = request.query['file']&.tempfile
+      key  = request.query['key'] || ''
+      if (err = validate_key(key))
+        result = err
+      elsif file.nil?
+        result = 'Error: file is required'
+      else
+        begin
+          decoded = RbShard.decode(file.read, key)
+          response.status = 200
+          response['Content-Type'] = 'application/octet-stream'
+          response['Content-Disposition'] = 'attachment; filename="decoded.txt"'
+          response.body = decoded
+          return
+        rescue => e
+          result = "Error: #{e.message}"
+        end
+      end
+      response.content_type = 'text/html'
+      response.body = result_page('Decode File', result)
     else
       response.status = 404
       response.body = 'Not found'
@@ -67,16 +113,28 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
           <h2>Encode</h2>
           <form action="/encode" method="post">
             <textarea name="data" rows="5"></textarea><br/>
-            Key: <input type="text" name="key"/><br/>
+            Key: <input type="text" name="key" required/><br/>
             <input type="submit" value="Encode"/>
+          </form>
+          <h3>From File</h3>
+          <form action="/encode_file" method="post" enctype="multipart/form-data">
+            <input type="file" name="file"/><br/>
+            Key: <input type="text" name="key" required/><br/>
+            <input type="submit" value="Encode File"/>
           </form>
         </div>
         <div class="section">
           <h2>Decode</h2>
           <form action="/decode" method="post">
             <textarea name="data" rows="5"></textarea><br/>
-            Key: <input type="text" name="key"/><br/>
+            Key: <input type="text" name="key" required/><br/>
             <input type="submit" value="Decode"/>
+          </form>
+          <h3>From File</h3>
+          <form action="/decode_file" method="post" enctype="multipart/form-data">
+            <input type="file" name="file"/><br/>
+            Key: <input type="text" name="key" required/><br/>
+            <input type="submit" value="Decode File"/>
           </form>
         </div>
       </body>
