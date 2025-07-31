@@ -55,4 +55,6 @@ ruby bin/rbshard_desktop
 ```
 
 This opens a window with text areas for input and results along with an entry
-field for your secret key.
+field for your secret key. A simple menu provides options to open files for
+encoding, save results to disk and quit the application. Keys must be at least
+eight characters long and invalid operations will show an error dialog.

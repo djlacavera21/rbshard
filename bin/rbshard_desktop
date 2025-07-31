@@ -4,6 +4,7 @@ require 'base64'
 require_relative '../lib/rbshard'
 
 class RbShardDesktop
+  KEY_MIN_LEN = 8
   def initialize
     @builder = Gtk::Builder.new
     @builder.add_from_string(UI)
@@ -13,6 +14,9 @@ class RbShardDesktop
     @key_entry = @builder['key']
     @builder['encode_button'].signal_connect('clicked') { encode }
     @builder['decode_button'].signal_connect('clicked') { decode }
+    @builder['open_item'].signal_connect('activate') { open_file }
+    @builder['save_item'].signal_connect('activate') { save_file }
+    @builder['quit_item'].signal_connect('activate') { Gtk.main_quit }
     @window.signal_connect('destroy') { Gtk.main_quit }
     @window.show_all
   end
@@ -20,19 +24,74 @@ class RbShardDesktop
   def encode
     data = @input.text
     key = @key_entry.text
+    if (err = validate_key(key))
+      show_error(err)
+      return
+    end
     result = Base64.strict_encode64(RbShard.encode(data, key))
     @output.text = result
   rescue => e
-    @output.text = "Error: #{e.message}"
+    show_error(e.message)
   end
 
   def decode
     data = @input.text
     key = @key_entry.text
+    if (err = validate_key(key))
+      show_error(err)
+      return
+    end
     decoded = RbShard.decode(Base64.strict_decode64(data), key)
     @output.text = decoded
   rescue => e
-    @output.text = "Error: #{e.message}"
+    show_error(e.message)
+  end
+
+  def open_file
+    dialog = Gtk::FileChooserDialog.new(
+      title: 'Open File',
+      parent: @window,
+      action: Gtk::FileChooserAction::OPEN,
+      buttons: [[Gtk::Stock::OPEN, Gtk::ResponseType::ACCEPT],
+                [Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL]]
+    )
+    if dialog.run == Gtk::ResponseType::ACCEPT
+      @input.text = File.read(dialog.filename)
+    end
+    dialog.destroy
+  end
+
+  def save_file
+    dialog = Gtk::FileChooserDialog.new(
+      title: 'Save Result',
+      parent: @window,
+      action: Gtk::FileChooserAction::SAVE,
+      buttons: [[Gtk::Stock::SAVE, Gtk::ResponseType::ACCEPT],
+                [Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL]]
+    )
+    dialog.do_overwrite_confirmation = true
+    if dialog.run == Gtk::ResponseType::ACCEPT
+      File.write(dialog.filename, @output.text)
+    end
+    dialog.destroy
+  end
+
+  def validate_key(key)
+    return 'Key is required' if key.to_s.empty?
+    return "Key must be at least #{KEY_MIN_LEN} characters" if key.length < KEY_MIN_LEN
+    nil
+  end
+
+  def show_error(message)
+    dialog = Gtk::MessageDialog.new(
+      parent: @window,
+      flags: :destroy_with_parent,
+      type: :error,
+      buttons_type: :close,
+      message: message
+    )
+    dialog.run
+    dialog.destroy
   end
 
   UI = <<~UI
@@ -44,6 +103,34 @@ class RbShardDesktop
           <object class="GtkBox" id="main_box">
             <property name="orientation">vertical</property>
             <property name="spacing">5</property>
+            <child>
+              <object class="GtkMenuBar" id="menu_bar">
+                <child>
+                  <object class="GtkMenuItem" id="file_menu_item">
+                    <property name="label">File</property>
+                    <child type="submenu">
+                      <object class="GtkMenu" id="file_menu">
+                        <child>
+                          <object class="GtkMenuItem" id="open_item">
+                            <property name="label">Open...</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkMenuItem" id="save_item">
+                            <property name="label">Save Result...</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkMenuItem" id="quit_item">
+                            <property name="label">Quit</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
             <child>
               <object class="GtkLabel" id="input_label">
                 <property name="label">Input</property>
