@@ -1,0 +1,119 @@
+#!/usr/bin/env ruby
+require 'gtk3'
+require 'base64'
+require_relative '../lib/rbshard'
+
+class RbShardDesktop
+  def initialize
+    @builder = Gtk::Builder.new
+    @builder.add_from_string(UI)
+    @window = @builder['window']
+    @input  = @builder['input_buffer']
+    @output = @builder['output_buffer']
+    @key_entry = @builder['key']
+    @builder['encode_button'].signal_connect('clicked') { encode }
+    @builder['decode_button'].signal_connect('clicked') { decode }
+    @window.signal_connect('destroy') { Gtk.main_quit }
+    @window.show_all
+  end
+
+  def encode
+    data = @input.text
+    key = @key_entry.text
+    result = Base64.strict_encode64(RbShard.encode(data, key))
+    @output.text = result
+  rescue => e
+    @output.text = "Error: #{e.message}"
+  end
+
+  def decode
+    data = @input.text
+    key = @key_entry.text
+    decoded = RbShard.decode(Base64.strict_decode64(data), key)
+    @output.text = decoded
+  rescue => e
+    @output.text = "Error: #{e.message}"
+  end
+
+  UI = <<~UI
+    <interface>
+      <requires lib="gtk+" version="3.0"/>
+      <object class="GtkWindow" id="window">
+        <property name="title">RbShard Desktop</property>
+        <child>
+          <object class="GtkBox" id="main_box">
+            <property name="orientation">vertical</property>
+            <property name="spacing">5</property>
+            <child>
+              <object class="GtkLabel" id="input_label">
+                <property name="label">Input</property>
+                <attributes><attribute name="weight" value="bold"/></attributes>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="vexpand">true</property>
+                <child>
+                  <object class="GtkTextView" id="input">
+                    <property name="buffer">input_buffer</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="key_box">
+                <property name="orientation">horizontal</property>
+                <child>
+                  <object class="GtkLabel" id="key_label">
+                    <property name="label">Key:</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkEntry" id="key"/>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="button_box">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">5</property>
+                <child>
+                  <object class="GtkButton" id="encode_button">
+                    <property name="label">Encode</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="decode_button">
+                    <property name="label">Decode</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="output_label">
+                <property name="label">Result</property>
+                <attributes><attribute name="weight" value="bold"/></attributes>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="vexpand">true</property>
+                <child>
+                  <object class="GtkTextView" id="output">
+                    <property name="editable">false</property>
+                    <property name="buffer">output_buffer</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+      <object class="GtkTextBuffer" id="input_buffer"/>
+      <object class="GtkTextBuffer" id="output_buffer"/>
+    </interface>
+  UI
+end
+
+RbShardDesktop.new
+Gtk.main

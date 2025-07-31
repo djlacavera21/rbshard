@@ -42,3 +42,15 @@ Then visit `http://localhost:4567` in your browser to access forms for encoding
 and decoding text using a secret key.
 
 Development is experimental and feedback is welcome.
+
+## Desktop UI
+
+You can also use a simple GTK-based desktop application to run encode and
+decode operations locally:
+
+```
+ruby bin/rbshard_desktop
+```
+
+This opens a window with text areas for input and results along with an entry
+field for your secret key.
