@@ -39,9 +39,9 @@ ruby bin/rbshard_ui
 ```
 
 Then visit `http://localhost:4567` in your browser to access forms for encoding
-and decoding text using a secret key.
-
-Development is experimental and feedback is welcome.
+and decoding text using a secret key. The interface now validates that a key
+is provided and escapes displayed results for better security. Feedback is
+welcome as the UI continues to evolve.
 
 ## Desktop UI
 

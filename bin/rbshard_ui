@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 require 'webrick'
 require 'base64'
+require 'cgi'
 require_relative '../lib/rbshard'
 
 class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
@@ -19,18 +20,26 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
     when '/encode'
       data = request.query['data'] || ''
       key = request.query['key'] || ''
-      encoded = RbShard.encode(data, key)
-      result = Base64.strict_encode64(encoded)
+      if key.empty?
+        result = 'Error: key is required'
+      else
+        encoded = RbShard.encode(data, key)
+        result = Base64.strict_encode64(encoded)
+      end
       response.content_type = 'text/html'
       response.body = result_page('Encode', result)
     when '/decode'
       b64 = request.query['data'] || ''
       key = request.query['key'] || ''
-      begin
-        decoded = RbShard.decode(Base64.strict_decode64(b64), key)
-        result = decoded
-      rescue => e
-        result = "Error: #{e.message}"
+      if key.empty?
+        result = 'Error: key is required'
+      else
+        begin
+          decoded = RbShard.decode(Base64.strict_decode64(b64), key)
+          result = decoded
+        rescue => e
+          result = "Error: #{e.message}"
+        end
       end
       response.content_type = 'text/html'
       response.body = result_page('Decode', result)
@@ -45,31 +54,43 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
   def main_form
     <<-HTML
     <html>
+      <head>
+        <style>
+          body { font-family: sans-serif; margin: 2em; }
+          textarea { width: 100%; }
+          .section { margin-bottom: 2em; }
+        </style>
+      </head>
       <body>
         <h1>RbShard UI</h1>
-        <h2>Encode</h2>
-        <form action="/encode" method="post">
-          <textarea name="data" rows="5" cols="60"></textarea><br/>
-          Key: <input type="text" name="key"/><br/>
-          <input type="submit" value="Encode"/>
-        </form>
-        <h2>Decode</h2>
-        <form action="/decode" method="post">
-          <textarea name="data" rows="5" cols="60"></textarea><br/>
-          Key: <input type="text" name="key"/><br/>
-          <input type="submit" value="Decode"/>
-        </form>
+        <div class="section">
+          <h2>Encode</h2>
+          <form action="/encode" method="post">
+            <textarea name="data" rows="5"></textarea><br/>
+            Key: <input type="text" name="key"/><br/>
+            <input type="submit" value="Encode"/>
+          </form>
+        </div>
+        <div class="section">
+          <h2>Decode</h2>
+          <form action="/decode" method="post">
+            <textarea name="data" rows="5"></textarea><br/>
+            Key: <input type="text" name="key"/><br/>
+            <input type="submit" value="Decode"/>
+          </form>
+        </div>
       </body>
     </html>
     HTML
   end
 
   def result_page(action, result)
+    escaped = CGI.escapeHTML(result.to_s)
     <<-HTML
     <html>
       <body>
         <h1>#{action} Result</h1>
-        <textarea rows="5" cols="60">#{result}</textarea><br/>
+        <textarea rows="5" cols="60" readonly>#{escaped}</textarea><br/>
         <a href="/">Back</a>
       </body>
     </html>

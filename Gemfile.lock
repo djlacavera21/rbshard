@@ -43,6 +43,7 @@ GEM
       cairo-gobject (= 4.3.0)
       gobject-introspection (= 4.3.0)
     pkg-config (1.6.2)
+    rake (13.3.0)
     red-colors (0.4.0)
       json
       matrix
@@ -54,6 +55,7 @@ PLATFORMS
 
 DEPENDENCIES
   minitest (~> 5)
+  rake (~> 13)
   rbshard!
 
 BUNDLED WITH

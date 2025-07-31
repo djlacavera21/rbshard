@@ -10,4 +10,5 @@ Gem::Specification.new do |spec|
   spec.add_runtime_dependency 'twofish', '~> 1.0'
   spec.add_runtime_dependency 'gtk3', '>= 4.0'
   spec.add_development_dependency 'minitest', '~> 5'
+  spec.add_development_dependency 'rake', '~> 13'
 end
