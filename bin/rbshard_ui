@@ -53,34 +53,39 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
       response.body = result_page('Decode', result)
     when '/encode_file'
       file = request.query['file']&.tempfile
-      key  = request.query['key'] || ''
+      key = request.query['key'] || ''
       if (err = validate_key(key))
         result = err
       elsif file.nil?
         result = 'Error: file is required'
       else
-        encoded = RbShard.encode(file.read, key)
+        archive = RbShard.pack(file.read, key)
         response.status = 200
         response['Content-Type'] = 'application/octet-stream'
         response['Content-Disposition'] = 'attachment; filename="encoded.rbs"'
-        response.body = encoded
+        response.body = archive
         return
       end
       response.content_type = 'text/html'
       response.body = result_page('Encode File', result)
     when '/decode_file'
       file = request.query['file']&.tempfile
-      key  = request.query['key'] || ''
+      key = request.query['key'] || ''
       if (err = validate_key(key))
         result = err
       elsif file.nil?
         result = 'Error: file is required'
       else
         begin
-          decoded = RbShard.decode(file.read, key)
+          raw = file.read
+          decoded = if RbShard.container?(raw)
+                      RbShard.unpack(raw, key)
+                    else
+                      RbShard.decode(raw, key)
+                    end
           response.status = 200
           response['Content-Type'] = 'application/octet-stream'
-          response['Content-Disposition'] = 'attachment; filename="decoded.txt"'
+          response['Content-Disposition'] = 'attachment; filename="decoded.bin"'
           response.body = decoded
           return
         rescue => e
@@ -101,39 +106,46 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
     <<-HTML
     <html>
       <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>RbShard UI</title>
         <style>
-          body { font-family: sans-serif; margin: 2em; }
-          textarea { width: 100%; }
-          .section { margin-bottom: 2em; }
+          :root { color-scheme: light dark; }
+          body { font-family: system-ui, sans-serif; margin: 2em auto; max-width: 900px; padding: 0 1em; }
+          textarea { width: 100%; box-sizing: border-box; }
+          input[type="text"], input[type="password"] { width: min(100%, 28rem); }
+          .section { margin-bottom: 2em; padding: 1em; border: 1px solid #7775; border-radius: 8px; }
+          .hint { opacity: 0.75; font-size: 0.9em; }
         </style>
       </head>
       <body>
         <h1>RbShard UI</h1>
+        <p class="hint">File encoding writes the versioned RBSH container format. Text encode/decode retains the legacy Base64-wrapped raw codec for compatibility.</p>
         <div class="section">
-          <h2>Encode</h2>
+          <h2>Encode Text</h2>
           <form action="/encode" method="post">
             <textarea name="data" rows="5"></textarea><br/>
-            Key: <input type="text" name="key" required/><br/>
+            Key: <input type="password" name="key" minlength="8" required/><br/>
             <input type="submit" value="Encode"/>
           </form>
-          <h3>From File</h3>
+          <h3>Pack File</h3>
           <form action="/encode_file" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"/><br/>
-            Key: <input type="text" name="key" required/><br/>
-            <input type="submit" value="Encode File"/>
+            <input type="file" name="file" required/><br/>
+            Key: <input type="password" name="key" minlength="8" required/><br/>
+            <input type="submit" value="Create .rbs File"/>
           </form>
         </div>
         <div class="section">
-          <h2>Decode</h2>
+          <h2>Decode Text</h2>
           <form action="/decode" method="post">
             <textarea name="data" rows="5"></textarea><br/>
-            Key: <input type="text" name="key" required/><br/>
+            Key: <input type="password" name="key" minlength="8" required/><br/>
             <input type="submit" value="Decode"/>
           </form>
-          <h3>From File</h3>
+          <h3>Unpack File</h3>
           <form action="/decode_file" method="post" enctype="multipart/form-data">
-            <input type="file" name="file"/><br/>
-            Key: <input type="text" name="key" required/><br/>
+            <input type="file" name="file" required/><br/>
+            Key: <input type="password" name="key" minlength="8" required/><br/>
             <input type="submit" value="Decode File"/>
           </form>
         </div>
@@ -146,8 +158,9 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
     escaped = CGI.escapeHTML(result.to_s)
     <<-HTML
     <html>
+      <head><meta charset="utf-8"/><title>#{CGI.escapeHTML(action)} Result</title></head>
       <body>
-        <h1>#{action} Result</h1>
+        <h1>#{CGI.escapeHTML(action)} Result</h1>
         <textarea rows="5" cols="60" readonly>#{escaped}</textarea><br/>
         <a href="/">Back</a>
       </body>
@@ -156,7 +169,8 @@ class RbShardServlet < WEBrick::HTTPServlet::AbstractServlet
   end
 end
 
-server = WEBrick::HTTPServer.new(Port: 4567)
+server = WEBrick::HTTPServer.new(Port: Integer(ENV.fetch('PORT', '4567')), BindAddress: ENV.fetch('BIND', '127.0.0.1'))
 server.mount '/', RbShardServlet
 trap('INT') { server.shutdown }
+trap('TERM') { server.shutdown }
 server.start
