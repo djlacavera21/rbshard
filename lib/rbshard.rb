@@ -106,10 +106,8 @@ module RbShard
     LZW.decompress(decrypt(data, key))
   end
 
-  # Current v2 container. Password/key material is expanded with PBKDF2-HMAC-
-  # SHA256 into independent encryption and authentication keys. The compressed
-  # payload is encrypted with Twofish-CBC using a random IV, then authenticated
-  # with HMAC-SHA256 over the complete header and ciphertext.
+  # In-memory authenticated v2 container. File-oriented callers should prefer
+  # pack_file/unpack_file, which use streaming RBS v3 for bounded memory use.
   def self.pack(data, key, kdf_iterations: V2_KDF_ITERATIONS)
     validate_password!(key)
     validate_iterations!(kdf_iterations)
@@ -138,6 +136,7 @@ module RbShard
     case version
     when 1 then unpack_v1(bytes, key)
     when 2 then unpack_v2(bytes, key)
+    when 3 then unpack_v3_bytes(bytes, key)
     else
       raise FormatError, "Unsupported RbShard format version: #{version}"
     end
@@ -147,6 +146,8 @@ module RbShard
     data.to_s.b.start_with?(MAGIC)
   end
 
+  # Retained as an in-memory v2 helper for API compatibility. For large files,
+  # use pack_file so the input is never loaded in full.
   def self.save_rbs(path, data, key, kdf_iterations: V2_KDF_ITERATIONS)
     File.binwrite(path, pack(data, key, kdf_iterations: kdf_iterations))
   end
@@ -170,6 +171,8 @@ module RbShard
       inspect_v1(bytes)
     when 2
       inspect_v2(bytes)
+    when 3
+      inspect_v3_bytes(bytes)
     else
       { format: :container, version: version, supported: false, total_bytes: bytes.bytesize }
     end
@@ -248,6 +251,7 @@ module RbShard
     {
       format: :container,
       version: 2,
+      streaming: false,
       authenticated: true,
       kdf: :'pbkdf2-hmac-sha256',
       kdf_iterations: kdf_iterations,
@@ -305,3 +309,5 @@ module RbShard
   end
   private_class_method :secure_compare
 end
+
+require_relative 'rbshard/stream'
