@@ -3,7 +3,7 @@ PATH
   specs:
     rbshard (0.1.0)
       twofish (~> 1.0)
-      webrick (>= 1.8)
+      webrick (~> 1.8)
 
 GEM
   remote: https://rubygems.org/
