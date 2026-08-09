@@ -2,61 +2,104 @@
 
 rbshard 0.1.0
 
-RbShard provides simple compression and encryption utilities built in Ruby.
-Compression is performed with a minimal LZW implementation and data is
-encrypted using the Twofish cipher. Files stored with the `.rbs` extension
-contain compressed and encrypted payloads.
+RbShard is a small Ruby compression and encryption toolkit. It combines a compact LZW codec with Twofish encryption and provides a versioned `.rbs` container format for storing encrypted payloads.
+
+> **Security note:** RbShard is an experimental project, not a substitute for a professionally reviewed authenticated-encryption format. The v1 container adds corruption/wrong-key detection with SHA-256, but it does not provide cryptographic authentication against an active attacker. Do not use it as the sole protection for high-value secrets.
 
 ## Features
 
-* LZW based compression and decompression
+* Binary-safe LZW compression and decompression
 * Twofish encryption and decryption
-* Convenience helpers to read and write `.rbs` files
+* Versioned, self-identifying `.rbs` containers
+* SHA-256 plaintext integrity verification after decryption
+* Legacy headerless `.rbs` read compatibility
+* Convenience helpers for files and in-memory payloads
+* Experimental Sinatra-style web UI and GTK desktop UI
+* Minitest coverage for text, binary data, containers, corruption, and legacy files
+
+## Container format
+
+New files written by `save_rbs` use format version 1:
+
+| Field | Size | Description |
+| --- | ---: | --- |
+| Magic | 4 bytes | ASCII `RBSH` |
+| Version | 1 byte | Currently `1` |
+| Payload length | 4 bytes | Little-endian encrypted payload length |
+| Payload | variable | LZW-compressed data encrypted with Twofish |
+| Digest | 32 bytes | SHA-256 of the original plaintext |
+
+The header makes new archives distinguishable from older raw encrypted payloads. `load_rbs` automatically reads both formats by default.
 
 ## Usage
 
-```
+```ruby
 require 'rbshard'
 
 data = 'Hello rbshard!'
 key = 'secretkey1234567'
 
-# Encode and save a file
 RbShard.save_rbs('message.rbs', data, key)
-
-# Load and decode
 original = RbShard.load_rbs('message.rbs', key)
 puts original # => "Hello rbshard!"
 ```
 
+### In-memory containers
+
+```ruby
+archive = RbShard.pack('classified-ish text', key)
+metadata = RbShard.inspect_rbs(archive)
+# => { format: :container, version: 1, payload_bytes: ..., total_bytes: ... }
+
+plaintext = RbShard.unpack(archive, key)
+```
+
+### Legacy codec API
+
+`encode` and `decode` remain available and produce/consume the original headerless encrypted representation:
+
+```ruby
+encoded = RbShard.encode(data, key)
+decoded = RbShard.decode(encoded, key)
+```
+
+To reject old headerless files when loading from disk:
+
+```ruby
+RbShard.load_rbs('message.rbs', key, allow_legacy: false)
+```
+
 ## Web UI
 
-An experimental web interface is provided to quickly try out encoding and
-decoding operations. Start the server with:
+Start the experimental web interface with:
 
-```
+```sh
 ruby bin/rbshard_ui
 ```
 
-Then visit `http://localhost:4567` in your browser to access forms for encoding
-and decoding text using a secret key. Keys must be at least eight characters
-long. You can paste text directly or upload files to encode and decode. The
-interface escapes displayed results for better security and will return encoded
-or decoded files for download when using the upload options.
-Feedback is welcome as the UI continues to evolve.
+Then visit `http://localhost:4567`. The interface supports text and file encode/decode operations and validates user-supplied keys before processing.
 
 ## Desktop UI
 
-You can also use a simple GTK-based desktop application to run encode and
-decode operations locally:
+Start the GTK desktop application with:
 
-```
+```sh
 ruby bin/rbshard_desktop
 ```
 
-This opens a window with text areas for input and results along with an entry
-field for your secret key. A simple menu provides options to open files for
-encoding, save results to disk and quit the application. Additional menu items
-allow encrypting and decrypting arbitrary files such as PDFs or text documents
-directly to and from `.rbs` archives. Keys must be at least eight characters
-long and invalid operations will show an error dialog.
+The desktop UI provides text encode/decode operations, file encryption/decryption, open/save actions, clipboard support, clearing controls, error dialogs, and status messages.
+
+## Development
+
+Install dependencies and run the test suite:
+
+```sh
+bundle install
+bundle exec ruby -Itest test/test_rbshard.rb
+```
+
+The core library intentionally has a small public API. Changes to the on-disk container should introduce a new `FORMAT_VERSION` and retain an explicit migration/read path for older versions whenever practical.
+
+## Roadmap
+
+Good next steps include replacing the v1 digest-only integrity scheme with a standard authenticated-encryption construction, streaming large files instead of buffering them entirely in memory, adding a command-line interface, fuzz/property tests for the LZW decoder and container parser, and publishing a formal format specification with test vectors.
