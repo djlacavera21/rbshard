@@ -1,16 +1,86 @@
 # RbShard Container Format
 
-This document describes the portable `.rbs` container family. New writers emit format version 2. Readers retain compatibility with version 1 and with the original headerless raw codec.
+This document describes the portable `.rbs` container family. File-oriented writers now emit streaming **RBS v3** containers. The in-memory `RbShard.pack` API continues to emit authenticated RBS v2. Readers retain compatibility with v3, v2, v1, and the original headerless raw codec.
 
 ## Goals
 
-The container layer gives RbShard files a recognizable signature, explicit versioning, deterministic payload boundaries, password-based key derivation, randomized encryption, integrity/authenticity checking, and an upgrade path independent of the public Ruby API.
+The format provides recognizable magic bytes, explicit versioning, bounded parser work, password-based key derivation, randomized encryption, integrity/authenticity checking, backward compatibility, and a path for multi-gigabyte files without loading the entire plaintext or ciphertext into memory.
 
-## Version 2 (current)
+## Version 3 — streaming file format
 
-### Byte layout
+RBS v3 divides plaintext into independently compressed, encrypted, and authenticated records. A final authenticated footer binds the ordered list of chunk tags and aggregate counts.
 
-All offsets are measured from the beginning of the file.
+### File header
+
+| Offset | Length | Name | Encoding |
+| ---: | ---: | --- | --- |
+| 0 | 4 | magic | ASCII `RBSH` |
+| 4 | 1 | version | unsigned byte, value `3` |
+| 5 | 4 | KDF iterations | unsigned 32-bit little-endian |
+| 9 | 4 | chunk size | unsigned 32-bit little-endian |
+| 13 | 16 | salt | random bytes |
+
+The v3 header is 29 bytes.
+
+The password/key is expanded with PBKDF2-HMAC-SHA256 into 64 bytes. The first 32 bytes are the Twofish encryption key and the final 32 bytes are the HMAC authentication key. The default KDF work factor remains 200,000 iterations.
+
+### Chunk record
+
+Each non-empty plaintext chunk is represented as:
+
+| Length | Name | Encoding |
+| ---: | --- | --- |
+| 4 | marker | ASCII `CHNK` |
+| 4 | chunk index | unsigned 32-bit little-endian |
+| 4 | plaintext length | unsigned 32-bit little-endian |
+| 4 | ciphertext length | unsigned 32-bit little-endian |
+| 16 | IV | random bytes |
+| N | ciphertext | LZW-compressed plaintext encrypted with Twofish-CBC + PKCS#7 |
+| 32 | chunk tag | HMAC-SHA256 |
+
+The per-chunk tag is:
+
+```text
+HMAC-SHA256(authentication_key,
+            complete_v3_header || chunk_record_header || ciphertext)
+```
+
+Readers MUST validate the chunk index and length bounds, read the complete ciphertext/tag, and verify the chunk tag before decrypting or decompressing that record.
+
+Chunk IVs are generated independently. Chunk indexes begin at zero and increase by exactly one.
+
+### Footer
+
+After the last chunk, writers emit:
+
+| Length | Name | Encoding |
+| ---: | --- | --- |
+| 4 | marker | ASCII `END!` |
+| 4 | chunk count | unsigned 32-bit little-endian |
+| 8 | total plaintext bytes | unsigned 64-bit little-endian |
+| 32 | final tag | HMAC-SHA256 |
+
+The final tag is produced incrementally over:
+
+```text
+complete_v3_header ||
+chunk_0_tag || chunk_1_tag || ... || chunk_n_tag ||
+footer_marker || chunk_count || total_plaintext_bytes
+```
+
+This footer detects missing/reordered records and authenticates the aggregate chunk count and total plaintext length. Readers MUST reject trailing bytes after the footer.
+
+### Streaming and commit semantics
+
+The library's `pack_stream` / `unpack_stream` methods operate on IO objects with memory bounded to approximately one working chunk plus its compressed/ciphertext representations.
+
+The file-oriented `unpack_file` helper writes v3 plaintext to a temporary file and atomically renames it to the requested destination only after the final footer authenticates. A wrong password, corrupted chunk, truncated archive, or invalid footer therefore does not replace the existing destination with partially verified plaintext.
+
+The default plaintext chunk size is 1 MiB. Current readers accept chunk sizes from 1 KiB through 64 MiB.
+
+## Version 2 — authenticated in-memory format
+
+RBS v2 remains supported and is still emitted by `RbShard.pack` / `RbShard.save_rbs` for compatibility with the in-memory API.
 
 | Offset | Length | Name | Encoding |
 | ---: | ---: | --- | --- |
@@ -23,57 +93,11 @@ All offsets are measured from the beginning of the file.
 | 45 | N | encrypted payload | opaque bytes |
 | 45 + N | 32 | authentication tag | HMAC-SHA256 |
 
-The total file size MUST be `77 + N` bytes.
+The total file size is `77 + N` bytes. V2 compresses the complete plaintext with LZW, encrypts it with Twofish-CBC + PKCS#7, and authenticates `complete_v2_header || ciphertext` with HMAC-SHA256. Readers verify the tag before decryption.
 
-### Key derivation
+V2 is authenticated but requires the complete payload in memory; v3 is preferred for file workflows.
 
-The caller-supplied key/password is processed using PBKDF2-HMAC-SHA256:
-
-```text
-PBKDF2-HMAC-SHA256(
-  password = caller supplied key bytes,
-  salt = 16-byte container salt,
-  iterations = header iteration count,
-  output length = 64 bytes
-)
-```
-
-The first 32 derived bytes are the Twofish encryption key. The final 32 bytes are the HMAC authentication key.
-
-The current writer default is 200,000 PBKDF2 iterations. Readers accept bounded iteration counts so a malicious header cannot request unbounded KDF work.
-
-### Encryption pipeline
-
-```text
-plaintext
-   |
-   v
-LZW compression
-   |
-   v
-Twofish-CBC + PKCS#7 padding
-32-byte derived encryption key
-16-byte random IV
-   |
-   v
-ciphertext
-```
-
-The 16-byte IV is stored in the authenticated header. Repacking identical plaintext with the same password SHOULD produce different container bytes because both the salt and IV are randomly generated.
-
-### Authentication
-
-Version 2 uses encrypt-then-MAC. The tag is:
-
-```text
-HMAC-SHA256(authentication_key, complete_v2_header || ciphertext)
-```
-
-Readers MUST verify the tag before attempting CBC decryption or decompression. An authentication failure should be reported without attempting to distinguish a wrong password from modified/corrupted input.
-
-## Version 1 (read compatibility)
-
-Version 1 was the first self-identifying RbShard container design.
+## Version 1 — read compatibility
 
 | Offset | Length | Name | Encoding |
 | ---: | ---: | --- | --- |
@@ -83,15 +107,11 @@ Version 1 was the first self-identifying RbShard container design.
 | 9 | N | encrypted payload | legacy raw codec bytes |
 | 9 + N | 32 | digest | SHA-256 of plaintext |
 
-The total file size is `41 + N` bytes.
-
-Version 1 detects accidental corruption and generally detects wrong-key output, but its digest is unkeyed and therefore it is **not an authenticated format**. New writers MUST prefer version 2.
+Version 1 uses an unkeyed digest and therefore is **not an authenticated format**. It remains read-only compatibility data.
 
 ## Headerless legacy payloads
 
-Files from the original implementation contain only the result of the legacy `RbShard.encode` pipeline and therefore do not start with `RBSH`.
-
-`RbShard.load_rbs` can read these by default for backward compatibility. Applications that do not need old files can pass `allow_legacy: false` to reject them. The raw `encode` / `decode` API is preserved specifically for compatibility and should not be selected for new file formats.
+Original files contain only the result of the historical `RbShard.encode` pipeline and do not start with `RBSH`. `RbShard.load_rbs` / `unpack_file` can read these by default. Callers may set `allow_legacy: false` to reject them.
 
 ## Compatibility matrix
 
@@ -99,24 +119,16 @@ Files from the original implementation contain only the result of the legacy `Rb
 | --- | --- | --- |
 | Headerless legacy | supported by default | raw API only |
 | RBS v1 | supported | no |
-| RBS v2 | supported | yes |
-| Unknown future version | rejected | n/a |
+| RBS v2 | supported | `pack` / `save_rbs` |
+| RBS v3 | supported | `pack_stream` / `pack_file` / CLI `pack` |
+| Unknown future version | rejected for decoding | n/a |
 
 ## Parser requirements
 
-Implementations should reject:
+Implementations should reject malformed/truncated headers, unsupported versions, unreasonable KDF or chunk-size parameters, invalid record markers, non-sequential chunk indexes, impossible record lengths, authentication-tag mismatches before decryption, malformed compressed streams, inconsistent footer counts/lengths, truncated footers, and trailing bytes after a valid footer.
 
-* truncated headers;
-* unknown magic values;
-* unsupported versions when decoding;
-* files whose actual size differs from the declared payload length;
-* v2 KDF iteration counts outside the implementation's accepted safety bounds;
-* v2 authentication-tag mismatches before decryption;
-* failed decryption; and
-* malformed compressed streams.
-
-Parsers should treat all payload, salt, IV, tag, and key material as binary and should not depend on the process default text encoding.
+All payload, salt, IV, tag, and key material is binary. Implementations should not depend on the process default text encoding.
 
 ## Security boundary
 
-Version 2 materially improves the format by adding randomized CBC encryption, password-based key derivation, independent encryption/authentication keys, and encrypt-then-HMAC authentication. It remains an experimental project built on a pure-Ruby Twofish dependency and has not received a dedicated cryptographic audit. Applications with high-value secrets should prefer mature, audited storage formats and libraries.
+V2 and v3 use randomized CBC encryption, PBKDF2-HMAC-SHA256, independently derived encryption/authentication keys, and encrypt-then-HMAC authentication. V3 additionally constrains memory use and authenticates each record before plaintext release. RbShard remains an experimental project built on a pure-Ruby Twofish dependency and has not received an independent cryptographic audit; high-value or regulated secrets should still prefer mature, audited encryption formats and libraries.
