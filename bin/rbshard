@@ -40,12 +40,14 @@ module RbShardCLI
   end
 
   def pack_command(argv)
+    config = { kdf_iterations: RbShard::V2_KDF_ITERATIONS }
     options = common_io_options('Pack plaintext into a versioned .rbs container')
     key_options(options)
-    config, paths = parse(options, argv)
+    options.on('--kdf-iterations N', Integer, 'PBKDF2 iterations for new v2 archives') { |value| config[:kdf_iterations] = value }
+    parsed, paths = parse(options, argv, config)
     input, output = require_paths(paths)
-    key = resolve_key(config)
-    RbShard.save_rbs(output, File.binread(input), key)
+    key = resolve_key(parsed)
+    RbShard.save_rbs(output, File.binread(input), key, kdf_iterations: parsed[:kdf_iterations])
     puts "Packed #{input} -> #{output}"
     0
   end
@@ -137,8 +139,8 @@ module RbShardCLI
       Usage: rbshard COMMAND [options]
 
       Commands:
-        pack INPUT OUTPUT       Create a versioned .rbs container
-        unpack INPUT OUTPUT     Restore plaintext from a .rbs file
+        pack INPUT OUTPUT       Create an authenticated v2 .rbs container
+        unpack INPUT OUTPUT     Restore plaintext from v2, v1, or legacy data
         inspect FILE            Display container metadata without decrypting
         encode INPUT OUTPUT     Use the legacy raw encode codec
         decode INPUT OUTPUT     Use the legacy raw decode codec
