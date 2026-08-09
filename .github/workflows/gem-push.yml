@@ -32,7 +32,7 @@ jobs:
 
       - name: Smoke-test packaged executable
         run: |
-          gem install --local ./rbshard-*.gem
+          gem install ./rbshard-*.gem
           rbshard version
 
       - name: Upload gem artifact
