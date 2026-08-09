@@ -1,0 +1,156 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'optparse'
+require_relative '../lib/rbshard'
+
+module RbShardCLI
+  module_function
+
+  def run(argv)
+    command = argv.shift
+    case command
+    when 'pack'
+      pack_command(argv)
+    when 'unpack'
+      unpack_command(argv)
+    when 'inspect'
+      inspect_command(argv)
+    when 'encode'
+      transform_command(argv, :encode)
+    when 'decode'
+      transform_command(argv, :decode)
+    when 'version', '--version', '-v'
+      puts RbShard::VERSION
+      0
+    when 'help', '--help', '-h', nil
+      puts help_text
+      command.nil? ? 1 : 0
+    else
+      warn "Unknown command: #{command}"
+      warn help_text
+      1
+    end
+  rescue OptionParser::ParseError, ArgumentError, RbShard::Error => e
+    warn "rbshard: #{e.message}"
+    2
+  rescue Errno::ENOENT, Errno::EACCES => e
+    warn "rbshard: #{e.message}"
+    3
+  end
+
+  def pack_command(argv)
+    options = common_io_options('Pack plaintext into a versioned .rbs container')
+    key_options(options)
+    config, paths = parse(options, argv)
+    input, output = require_paths(paths)
+    key = resolve_key(config)
+    RbShard.save_rbs(output, File.binread(input), key)
+    puts "Packed #{input} -> #{output}"
+    0
+  end
+
+  def unpack_command(argv)
+    config = { allow_legacy: true }
+    options = common_io_options('Unpack a .rbs container to plaintext')
+    key_options(options)
+    options.on('--no-legacy', 'Reject legacy headerless payloads') { config[:allow_legacy] = false }
+    parsed, paths = parse(options, argv, config)
+    input, output = require_paths(paths)
+    key = resolve_key(parsed)
+    plaintext = RbShard.load_rbs(input, key, allow_legacy: parsed[:allow_legacy])
+    File.binwrite(output, plaintext)
+    puts "Unpacked #{input} -> #{output}"
+    0
+  end
+
+  def inspect_command(argv)
+    options = OptionParser.new do |opts|
+      opts.banner = 'Usage: rbshard inspect FILE'
+      opts.on('-h', '--help', 'Show help') { puts opts; exit 0 }
+    end
+    _config, paths = parse(options, argv)
+    raise ArgumentError, 'inspect requires exactly one FILE' unless paths.length == 1
+
+    metadata = RbShard.inspect_rbs(File.binread(paths.first))
+    metadata.each { |key, value| puts "#{key}: #{value}" }
+    0
+  end
+
+  def transform_command(argv, operation)
+    options = common_io_options("#{operation.to_s.capitalize} using the legacy raw codec")
+    key_options(options)
+    config, paths = parse(options, argv)
+    input, output = require_paths(paths)
+    key = resolve_key(config)
+    result = RbShard.public_send(operation, File.binread(input), key)
+    File.binwrite(output, result)
+    puts "#{operation.to_s.capitalize}d #{input} -> #{output}"
+    0
+  end
+
+  def common_io_options(description)
+    OptionParser.new do |opts|
+      opts.banner = "#{description}\nUsage: rbshard #{description.split.first.downcase} [options] INPUT OUTPUT"
+      opts.on('-h', '--help', 'Show help') { puts opts; exit 0 }
+    end
+  end
+
+  def key_options(options)
+    options.on('-k', '--key KEY', 'Encryption key (discouraged: visible in process arguments)') { |value| @inline_key = value }
+    options.on('--key-env NAME', 'Read key from environment variable NAME') { |value| @key_env = value }
+    options.on('--key-file FILE', 'Read key bytes from FILE') { |value| @key_file = value }
+  end
+
+  def parse(options, argv, initial = {})
+    @inline_key = nil
+    @key_env = nil
+    @key_file = nil
+    paths = options.parse(argv)
+    [initial.merge(inline_key: @inline_key, key_env: @key_env, key_file: @key_file), paths]
+  end
+
+  def require_paths(paths)
+    raise ArgumentError, 'command requires INPUT and OUTPUT paths' unless paths.length == 2
+    paths
+  end
+
+  def resolve_key(config)
+    sources = [config[:inline_key], config[:key_env], config[:key_file]].compact
+    raise ArgumentError, 'provide exactly one of --key, --key-env, or --key-file' unless sources.length == 1
+
+    return config[:inline_key] if config[:inline_key]
+
+    if config[:key_env]
+      value = ENV[config[:key_env]]
+      raise ArgumentError, "environment variable #{config[:key_env]} is not set" if value.nil?
+      return value
+    end
+
+    File.binread(config[:key_file]).sub(/\r?\n\z/, '')
+  end
+
+  def help_text
+    <<~HELP
+      RbShard #{RbShard::VERSION}
+
+      Usage: rbshard COMMAND [options]
+
+      Commands:
+        pack INPUT OUTPUT       Create a versioned .rbs container
+        unpack INPUT OUTPUT     Restore plaintext from a .rbs file
+        inspect FILE            Display container metadata without decrypting
+        encode INPUT OUTPUT     Use the legacy raw encode codec
+        decode INPUT OUTPUT     Use the legacy raw decode codec
+        version                 Print the installed version
+        help                    Show this help
+
+      Key input for encryption/decryption commands:
+        --key KEY               Pass a key directly (least private)
+        --key-env NAME          Read the key from an environment variable
+        --key-file FILE         Read the key from a file
+    HELP
+  end
+end
+
+exit RbShardCLI.run(ARGV) if $PROGRAM_NAME == __FILE__
