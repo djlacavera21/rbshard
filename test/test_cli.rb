@@ -26,14 +26,19 @@ class RbShardCLITest < Minitest::Test
       original = "hello\x00rbshard\xff".b
       File.binwrite(input, original)
 
-      _stdout, stderr, status = run_cli('pack', '--key-env', 'RBSHARD_TEST_KEY', input, archive, env: { 'RBSHARD_TEST_KEY' => KEY })
+      _stdout, stderr, status = run_cli(
+        'pack', '--kdf-iterations', '10000', '--key-env', 'RBSHARD_TEST_KEY', input, archive,
+        env: { 'RBSHARD_TEST_KEY' => KEY }
+      )
       assert status.success?, stderr
       assert File.exist?(archive)
 
       stdout, stderr, status = run_cli('inspect', archive)
       assert status.success?, stderr
       assert_includes stdout, 'format: container'
-      assert_includes stdout, 'version: 1'
+      assert_includes stdout, 'version: 2'
+      assert_includes stdout, 'authenticated: true'
+      assert_includes stdout, 'kdf_iterations: 10000'
 
       _stdout, stderr, status = run_cli('unpack', '--key-env', 'RBSHARD_TEST_KEY', archive, output, env: { 'RBSHARD_TEST_KEY' => KEY })
       assert status.success?, stderr
