@@ -4,21 +4,22 @@ rbshard 0.1.0
 
 RbShard is a compact Ruby compression and encryption toolkit. It combines a binary-safe LZW codec with Twofish encryption and provides a versioned `.rbs` container format, command-line tooling, file helpers, and optional web/desktop interfaces.
 
-> **Security note:** RbShard is an experimental project, not a substitute for a professionally reviewed authenticated-encryption format. The v1 container adds corruption/wrong-key detection with SHA-256, but it does not provide cryptographic authentication against an active attacker. Do not use it as the sole protection for high-value secrets.
+> **Security note:** RbShard remains experimental and unaudited. New RBS v2 containers use PBKDF2-HMAC-SHA256, randomized Twofish-CBC, and encrypt-then-HMAC authentication, but high-value or regulated secrets should still use a mature audited encryption format. See [`SECURITY.md`](SECURITY.md).
 
 ## Features
 
 * Binary-safe LZW compression and decompression
-* Twofish encryption and decryption
-* Versioned, self-identifying `.rbs` containers
-* SHA-256 plaintext integrity verification after decryption
-* Legacy headerless `.rbs` read compatibility
+* Authenticated RBS v2 containers
+* PBKDF2-HMAC-SHA256 key derivation with random salts
+* Twofish-CBC encryption with random IVs
+* HMAC-SHA256 encrypt-then-MAC authentication
+* Backward-compatible RBS v1 and headerless legacy readers
 * First-class `rbshard` command-line interface
 * Convenience helpers for files and in-memory payloads
 * Experimental WEBrick web UI and optional GTK desktop UI
-* Minitest coverage for core and CLI workflows
+* Core and CLI Minitest coverage
 * Multi-version Ruby CI
-* Formal container-format documentation
+* Formal container-format and security documentation
 
 ## Architecture
 
@@ -27,36 +28,41 @@ RbShard is a compact Ruby compression and encryption toolkit. It combines a bina
              | Ruby API / CLI/UI |
              +---------+---------+
                        |
-              +--------v--------+
-              | RBS Container   |
-              | magic/version   |
-              | length/digest   |
-              +--------+--------+
+              +--------v---------+
+              | RBS v2 container|
+              | version / KDF    |
+              | salt / IV / HMAC |
+              +--------+---------+
                        |
-              +--------v--------+
-              | Twofish crypto  |
-              +--------+--------+
+              +--------v---------+
+              | Twofish-CBC      |
+              +--------+---------+
                        |
-              +--------v--------+
-              | LZW compression |
-              +-----------------+
+              +--------v---------+
+              | LZW compression  |
+              +------------------+
 ```
 
-The legacy `encode` / `decode` methods operate on the LZW + Twofish layers directly. New file-oriented APIs add the versioned container layer around that codec.
+The legacy `encode` / `decode` methods operate on the original LZW + Twofish path directly. New file-oriented APIs use authenticated v2 containers. Readers can still open v1 and original headerless payloads.
 
 ## Container format
 
-New files written by `save_rbs` use format version 1:
+New files written by `save_rbs` use **RBS v2**:
 
 | Field | Size | Description |
 | --- | ---: | --- |
 | Magic | 4 bytes | ASCII `RBSH` |
-| Version | 1 byte | Currently `1` |
-| Payload length | 4 bytes | Little-endian encrypted payload length |
-| Payload | variable | LZW-compressed data encrypted with Twofish |
-| Digest | 32 bytes | SHA-256 of the original plaintext |
+| Version | 1 byte | `2` |
+| KDF iterations | 4 bytes | PBKDF2 iteration count, little-endian |
+| Salt | 16 bytes | Random PBKDF2 salt |
+| IV | 16 bytes | Random Twofish-CBC IV |
+| Payload length | 4 bytes | Encrypted payload length, little-endian |
+| Payload | variable | LZW-compressed, Twofish-CBC encrypted data |
+| Authentication tag | 32 bytes | HMAC-SHA256 over header + ciphertext |
 
-The header makes new archives distinguishable from older raw encrypted payloads. `load_rbs` automatically reads both formats by default. See [`docs/FORMAT.md`](docs/FORMAT.md) for the byte-level specification and parser requirements.
+The supplied password/key is expanded with PBKDF2-HMAC-SHA256 into separate 32-byte encryption and authentication keys. The current writer default is 200,000 PBKDF2 iterations.
+
+See [`docs/FORMAT.md`](docs/FORMAT.md) for the byte-level v2 specification, v1 compatibility layout, and parser requirements.
 
 ## Ruby API
 
@@ -76,25 +82,36 @@ puts original # => "Hello rbshard!"
 ```ruby
 archive = RbShard.pack('example text', key)
 metadata = RbShard.inspect_rbs(archive)
-# => { format: :container, version: 1, payload_bytes: ..., total_bytes: ... }
+# => {
+#   format: :container,
+#   version: 2,
+#   authenticated: true,
+#   kdf: :'pbkdf2-hmac-sha256',
+#   cipher: :'twofish-cbc',
+#   ...
+# }
 
 plaintext = RbShard.unpack(archive, key)
 ```
 
-### Legacy codec API
+### Compatibility API
 
-`encode` and `decode` remain available and produce/consume the original headerless encrypted representation:
+`encode` and `decode` remain available for original headerless payloads:
 
 ```ruby
 encoded = RbShard.encode(data, key)
 decoded = RbShard.decode(encoded, key)
 ```
 
-To reject old headerless files when loading from disk:
+That path preserves historical behavior for compatibility and should not be selected for new encrypted file formats.
+
+To reject headerless files when loading from disk:
 
 ```ruby
 RbShard.load_rbs('message.rbs', key, allow_legacy: false)
 ```
+
+RBS v1 containers remain readable automatically.
 
 ## Command-line interface
 
@@ -102,7 +119,7 @@ The gem exposes a `rbshard` executable. From a source checkout, use `ruby bin/rb
 
 ```sh
 # Pack a file using a key stored in an environment variable
-export RBSHARD_KEY='secretkey1234567'
+export RBSHARD_KEY='correct horse battery staple'
 rbshard pack --key-env RBSHARD_KEY report.pdf report.rbs
 
 # Inspect metadata without decrypting
@@ -114,6 +131,8 @@ rbshard unpack --key-env RBSHARD_KEY report.rbs report.pdf
 
 Keys can be supplied with `--key`, `--key-env`, or `--key-file`. `--key-env` and `--key-file` are preferable because direct command-line arguments may be visible to other local processes or shell history.
 
+`pack --kdf-iterations N` is available for controlled interoperability/testing scenarios. Production users should normally retain the default rather than reducing the work factor.
+
 The CLI also exposes `encode` and `decode` commands for the legacy raw codec and `unpack --no-legacy` for applications that want to reject headerless files.
 
 ## Web UI
@@ -124,7 +143,7 @@ Start the experimental local web interface with:
 ruby bin/rbshard_ui
 ```
 
-Then visit `http://127.0.0.1:4567`. File uploads are written as versioned `.rbs` containers, while text encode/decode retains the original Base64-wrapped raw codec for compatibility. The server binds to loopback by default; `BIND` and `PORT` environment variables can override its listener.
+Then visit `http://127.0.0.1:4567`. File uploads are written as authenticated v2 `.rbs` containers, while text encode/decode retains the original Base64-wrapped raw codec for compatibility. The server binds to loopback by default; `BIND` and `PORT` environment variables can override its listener.
 
 ## Desktop UI
 
@@ -146,11 +165,15 @@ bundle install
 bundle exec rake test
 ```
 
-CI runs the suite across supported Ruby versions and smoke-tests the command-line executable. The core library intentionally has a small public API. Changes to the on-disk format should introduce a new `FORMAT_VERSION` and retain an explicit migration/read path for older versions whenever practical.
+CI runs the suite across supported Ruby versions and smoke-tests the command-line executable. Test code can lower the PBKDF2 iteration count to the accepted minimum to keep the suite fast while still exercising the v2 path.
+
+The on-disk container version is independent of the gem version. Any future format change should increment `FORMAT_VERSION` and preserve an explicit migration/read path whenever practical.
 
 ## Repository layout
 
 ```text
+.github/workflows/
+  ci.yml              Ruby test matrix
 bin/
   rbshard             CLI
   rbshard_ui          local WEBrick UI
@@ -161,12 +184,14 @@ lib/
 docs/
   FORMAT.md            RBS container specification
 test/
-  test_rbshard.rb      core tests
+  test_rbshard.rb      core/container tests
   test_cli.rb          CLI integration tests
+CHANGELOG.md           unreleased/release changes
+SECURITY.md            security model and reporting guidance
 ```
 
 ## Roadmap
 
-The next major format revision should replace the v1 digest-only integrity mechanism with a standard authenticated-encryption or encrypt-then-MAC construction. Additional priorities include password-based key derivation with explicit salts and parameters, streaming support for large files, fuzz/property testing of the parser and LZW decoder, portable test vectors, richer metadata, and reproducible release automation.
+Next priorities are streaming encryption/decryption for large files, fuzz/property testing of the parser and LZW decoder, portable interoperability test vectors, richer authenticated metadata, safer secret-entry UX, reproducible release automation, and eventually evaluating whether a more modern audited cryptographic dependency should replace the legacy Twofish implementation entirely.
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the current unreleased work.
